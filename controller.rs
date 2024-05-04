@@ -67,41 +67,35 @@ mod websocket {
     }
 
     impl Frame {
-        fn new(stream: &mut TcpStream) -> Option<Self> {
-            let mut op_buff: [u8; 2] = [0; 2];
-            let read_op = stream.read_exact(&mut op_buff);
-
-            if let Err(_) = read_op {
-                return None;
-            }
-
-            // First Byte
-            let is_final = op_buff[0] & 0b10000000 != 0; // First bit is whether this is the final segment of the message
-            let opcode = match op_buff[0] & 0b00001111 { // next 4 bits are the opcode
-                0x1 => Opcode::Text,
-                0x2 => Opcode::Binary,
-                0x9 => Opcode::Ping,
-                0xA => Opcode::Pong,
-                _ => Opcode::Ctrl
+        fn parse_op_code(byte: [u8; 1]) -> (bool, Option<Opcode>) {
+            let is_final =  byte[0] & 0b10000000 != 0; // First bit is whether this is the final segment of the message
+            let opcode = match byte[0] & 0b00001111 { // next 4 bits are the opcode
+                0x1 => Some(Opcode::Text),
+                0x2 => Some(Opcode::Binary),
+                0x9 => Some(Opcode::Ping),
+                0xA => Some(Opcode::Pong),
+                _ => None
             };
 
-            // Second Byte
-            let is_masked = op_buff[1] & 0b10000000 != 0; // First bit is whether payload is masked
-            let payload_len = op_buff[1] & 0b01111111;
+            (is_final, opcode)
+        }
 
+        fn parse_payload_len(byte: [u8; 1]) -> (bool, u8){
+            let is_masked = byte[0] & 0b10000000 != 0; // First bit is whether payload is masked
+            let payload_len = byte[0] & 0b01111111;
 
-            // 3rd 4th 5th and 6th byte is masking-key
-            let mut mask_key: [u8; 4] = [0; 4];
-            if is_masked {
-                stream.read_exact(&mut mask_key).unwrap();
-            }
+            (is_masked, payload_len)
+        }
 
-            // Rest will be payload
-            let mut payload_buff = vec![0u8; payload_len as usize];
-            stream.read_exact(&mut payload_buff).unwrap();
+        fn read_mask_key_into_buff(buff: &mut [u8; 4], stream: &mut TcpStream) {
+            stream.read_exact(buff).unwrap();
+        }
+
+        fn read_payload(payload_buff: &mut Vec<u8>, is_masked: bool, mask_key: [u8; 4], stream: &mut TcpStream) -> String{
+            stream.read_exact(payload_buff).unwrap();
             
-            if is_masked { // Demask payload if needed
-                for i in 0..payload_len as usize {
+            if is_masked {
+                for i in 0..payload_buff.len() {
                     payload_buff[i] ^= mask_key[i % 4];
                 }
             }
@@ -112,9 +106,43 @@ mod websocket {
                 payload.push_str(&s)
             }
 
+            payload
+        }
+
+        fn parse_frame_buffer(stream: &mut TcpStream) -> Option<Frame> {
+            // First byte is whether this is the final segment of the message plus the opcode
+            let mut opcode_buff: [u8; 1] = [0; 1];
+            let read_op = stream.read_exact(&mut opcode_buff);
+            if let Err(_) = read_op {
+                return None;
+            }
+            let (is_final, opcode) = Frame::parse_op_code(opcode_buff);
+            if let None = opcode {
+                return None;
+            }
+
+            // Second byte is whether the payload is masked, and the payload length
+            let mut payload_len_buff: [u8; 1] = [0; 1];
+            let read_payload_len = stream.read_exact(&mut payload_len_buff);
+            if let Err(_) = read_payload_len {
+                return None;
+            }
+            let (is_masked, payload_len) = Frame::parse_payload_len(payload_len_buff);
+
+
+            // 3rd 4th 5th and 6th byte is masking key
+            let mut mask_key_buff: [u8; 4] = [0; 4];
+            if is_masked {
+                Frame::read_mask_key_into_buff(&mut mask_key_buff, stream);
+            }
+
+            // Rest will be payload
+            let mut payload_buff = vec![0u8; payload_len as usize];
+            let payload = Frame::read_payload(&mut payload_buff, is_masked, mask_key_buff, stream);
+
             let frame = Frame {
                 is_final,
-                opcode,
+                opcode: opcode.unwrap(),
                 is_masked,
                 masking_key: 0,
                 payload_len,
@@ -123,6 +151,10 @@ mod websocket {
 
             dbg!(&frame);
             Some(frame)
+        }
+
+        fn new(stream: &mut TcpStream) -> Option<Self> {
+            Frame::parse_frame_buffer(stream)
         }
     }
     pub struct WebSocketController {

@@ -5,6 +5,11 @@ use websocket::{WebSocketController, ConnectionStatus};
 use http::HttpController;
 
 
+pub fn handle_stream(stream: TcpStream) {
+    let mut c = make_controller(stream);
+    c.handle();
+}
+
 fn make_controller(stream: TcpStream) -> Box<dyn Controller> {
     let init_req = Request::new_from_stream(&stream);
     match init_req._type {
@@ -13,16 +18,18 @@ fn make_controller(stream: TcpStream) -> Box<dyn Controller> {
     }
 }
 
-pub fn handle_stream(stream: TcpStream) {
-    let mut c = make_controller(stream);
-    c.handle();
-}
-
-pub fn write_to_stream(content: String, stream: &mut TcpStream) {
+pub fn write_string_to_stream(content: String, stream: &mut TcpStream) {
     let bytes = content.as_bytes();
     stream.write_all(bytes).unwrap();
     if let Err(_) = stream.flush() {
-        println!("Error occured sending response.");
+        println!("Error writing to stream");
+    }
+}
+
+pub fn write_bytes_to_stream(bytes: &[u8], stream: &mut TcpStream) {
+    stream.write_all(bytes).unwrap();
+    if let Err(_) = stream.flush() {
+        println!("Error writing to stream");
     }
 }
 
@@ -33,18 +40,18 @@ trait Controller {
 mod websocket {
     use sha1::{Digest, Sha1};
     use base64;
-    use std::io::Write;
     use std::{collections::HashMap, io::Read, net::TcpStream};
     use std::time::Duration;
-    use super::Controller;
-    use super::write_to_stream;
+    use super::{write_bytes_to_stream, write_string_to_stream, Controller};
     use crate::shared::Response;
+
 
     #[derive(PartialEq)]
     pub enum ConnectionStatus {
         Open,
         Closed
     }
+
     #[derive(Debug)]
     enum Opcode {
         Cont,
@@ -165,18 +172,25 @@ mod websocket {
 
     impl Controller for WebSocketController {
         fn handle(&mut self) {
-            let _ = self.stream.set_read_timeout(Some(Duration::from_millis(50)));
-            if self.check_handshake() {
+            self.stream.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
+            if self.verify_handshake() {
                 self.do_handshake()
             }
             loop {
-                self.incoming_frame();
+                let frame: Option<Frame> = self.incoming_frame();
+                if let Some(f) = frame {
+                    // TODO: Probably have a connection status enum to specify whetehr to hangup the connection.
+                    self.handle_frame(f);
+                    if self.conn_status == ConnectionStatus::Closed {
+                        break;
+                    }
+                }
             }
         }
     }
 
     impl WebSocketController {
-        fn check_handshake(&self) -> bool {
+        fn verify_handshake(&self) -> bool {
             let request_line = self.request.headers.get("RequestLine");
             let upgrade_header = self.request.headers.get("Upgrade");
             if let Some(h) = upgrade_header {
@@ -191,7 +205,7 @@ mod websocket {
         fn do_handshake(&mut self) {
             let mut resp_headers: HashMap<String, String> = HashMap::new();
     
-            let client_key = self.request.headers.get("Sec-WebSocket-Key").unwrap().clone(); // TODO
+            let client_key = self.request.headers.get("Sec-WebSocket-Key").unwrap().clone();
             let resp_key = self.make_hs_key(&client_key);
     
             resp_headers.insert("StatusLine".to_string(), "HTTP/1.1 101 Switching Protocols".to_string());
@@ -202,7 +216,7 @@ mod websocket {
             let resp = Response::new_no_body(resp_headers);
             let resp_str = resp.headers_to_string();
     
-            write_to_stream(resp_str, &mut self.stream);
+            write_string_to_stream(resp_str, &mut self.stream);
         }
     
         fn make_hs_key(&self, request_key: &String) -> String {
@@ -219,26 +233,41 @@ mod websocket {
             base64_key
         }
     
-        fn incoming_frame(&mut self) {
-            let frame = Frame::new(&mut self.stream);
-            if let Some(f) = frame {
-                if f.payload == "pingme" { // Temp for testing ping 
-                    self.send_ping();
-                }
-                println!("{}", f.payload);
+        fn incoming_frame(&mut self) -> Option<Frame> {
+            Frame::new(&mut self.stream)
+        }
+
+        fn handle_frame(&mut self, frame: Frame) -> bool {
+            if frame.payload == "pingme" { // Temp for testing ping 
+                self.send_ping();
             }
+
+            if frame.payload == "closeconnection" {
+                self.close_connection();
+                return false;
+            }
+            println!("{}", frame.payload);
+            true
         }
 
         fn send_ping(&mut self) -> bool {
             let op_byte = 0b10001001;
             let payload_byte = 0b00000000;
             let ping: [u8; 2] = [op_byte, payload_byte];
-            let r = self.stream.write_all(&ping);
-            if let Ok(()) = r {
-                if let Ok(_) = self.stream.flush() {
-                    return true;
-                }
-            }
+            write_bytes_to_stream(&ping, &mut self.stream);
+
+            false
+        }
+
+        fn close_connection(&mut self) -> bool { // TODO support more status codes
+            let op_byte = [0b10001000];
+            let payload_len_byte = [0b00000010];
+            let payload: [u8; 2] = [0b00000011, 0b11101000]; // 1000 status code - normal closer
+            write_bytes_to_stream(&op_byte, &mut self.stream);
+            write_bytes_to_stream(&payload_len_byte, &mut self.stream);
+            write_bytes_to_stream(&payload, &mut self.stream);
+
+            self.conn_status = ConnectionStatus::Closed;
 
             false
         }

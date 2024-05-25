@@ -6,7 +6,7 @@ fn run_server(listener: TcpListener) {
     for stream in listener.incoming() {
         let s = stream.unwrap();
         // For now/testing purposes, this will block the main thread for each new connection
-        handle_stream(s)
+        handle_stream(s);
     }
 }
 

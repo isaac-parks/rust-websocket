@@ -10,8 +10,8 @@ pub fn handle_stream(stream: TcpStream) {
     c.handle();
 }
 
-fn make_controller(stream: TcpStream) -> Box<dyn Controller> {
-    let init_req = Request::new_from_stream(&stream);
+fn make_controller(mut stream: TcpStream) -> Box<dyn Controller> {
+    let init_req = Request::new_from_stream(&mut stream);
     match init_req._type {
         RequestType::Http => Box::new(HttpController {request: init_req, stream}),
         RequestType::WebSocket => Box::new(WebSocketController {request: init_req, stream, conn_status:ConnectionStatus::Open}),
@@ -101,10 +101,12 @@ mod websocket {
         fn read_payload(payload_buff: &mut Vec<u8>, is_masked: bool, mask_key: [u8; 4], stream: &mut TcpStream) -> String{
             stream.read_exact(payload_buff).unwrap();
             
-            if is_masked {
-                for i in 0..payload_buff.len() {
-                    payload_buff[i] ^= mask_key[i % 4];
-                }
+            if !is_masked {
+                0; // TODO return an error - all payloads from client must be masked
+            }
+
+            for i in 0..payload_buff.len() {
+                payload_buff[i] ^= mask_key[i % 4];
             }
 
             let mut payload = String::new();
@@ -124,8 +126,8 @@ mod websocket {
                 return None;
             }
             let (is_final, opcode) = Frame::parse_op_code(opcode_buff);
-            if let None = opcode {
-                return None;
+            if let Option::None = opcode {
+                return Option::None;
             }
 
             // Second byte is whether the payload is masked, and the payload length

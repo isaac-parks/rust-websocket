@@ -12,7 +12,7 @@ fn run_server(listener: TcpListener) {
 
 pub fn init() {
     let port: &str = "1818";
-    let host: &str = "127.0.0.1";
+    let host: &str = "192.168.0.103";
     let hn: &str = &format!("{}:{}", &host, &port);
 
     let listener = TcpListener::bind(&hn).unwrap();

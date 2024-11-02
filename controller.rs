@@ -1,9 +1,11 @@
-use std::{io::Write, net::TcpStream};
-
-use crate::shared::{Request, RequestType};
-use websocket::{WebSocketController, ConnectionStatus};
+use crate::func::{write_bytes_to_stream, write_string_to_stream};
+use crate::request::{Request, RequestType};
 use http::HttpController;
-
+use std::{
+    io::Write,
+    net::{Shutdown, TcpStream},
+};
+use websocket::{ConnectionStatus, WebSocketController};
 
 pub fn handle_stream(stream: TcpStream) {
     let mut c = make_controller(stream);
@@ -12,44 +14,56 @@ pub fn handle_stream(stream: TcpStream) {
 
 fn make_controller(mut stream: TcpStream) -> Box<dyn Controller> {
     let init_req = Request::new_from_stream(&mut stream);
-    match init_req._type {
-        RequestType::Http => Box::new(HttpController {request: init_req, stream}),
-        RequestType::WebSocket => Box::new(WebSocketController {request: init_req, stream, conn_status:ConnectionStatus::Open}),
-    }
-}
-
-pub fn write_string_to_stream(content: String, stream: &mut TcpStream) {
-    let bytes = content.as_bytes();
-    stream.write_all(bytes).unwrap();
-    if let Err(_) = stream.flush() {
-        println!("Error writing to stream");
-    }
-}
-
-pub fn write_bytes_to_stream(bytes: &[u8], stream: &mut TcpStream) {
-    stream.write_all(bytes).unwrap();
-    if let Err(_) = stream.flush() {
-        println!("Error writing to stream");
+    match init_req {
+        Ok(req) => {
+            if let RequestType::Http = req._type {
+                Box::new(HttpController {
+                    request: req,
+                    stream,
+                })
+            } else {
+                Box::new(WebSocketController {
+                    request: req,
+                    stream,
+                    conn_status: ConnectionStatus::Open,
+                })
+            }
+        }
+        Err(_) => Box::new(EmptyController { stream }),
     }
 }
 
 trait Controller {
-    fn handle(&mut self);
+    fn handle(&mut self) {}
+    fn exit(&mut self) {}
+}
+
+pub struct EmptyController {
+    stream: TcpStream,
+}
+
+impl Controller for EmptyController {
+    fn handle(&mut self) {
+        self.exit()
+    }
+    fn exit(&mut self) {
+        write_string_to_stream(String::new(), &mut self.stream);
+        self.stream.shutdown(Shutdown::Both).unwrap();
+    }
 }
 
 mod websocket {
-    use sha1::{Digest, Sha1};
-    use base64;
-    use std::{collections::HashMap, io::Read, net::TcpStream};
-    use std::time::Duration;
     use super::{write_bytes_to_stream, write_string_to_stream, Controller};
-    use crate::shared::Response;
-
+    use crate::response::Response;
+    use base64;
+    use sha1::{Digest, Sha1};
+    use std::time::Duration;
+    use std::{collections::HashMap, io::Read, net::TcpStream};
 
     #[derive(PartialEq)]
     pub enum ConnectionStatus {
         Open,
-        Closed
+        Closed,
     }
 
     #[derive(Debug)]
@@ -61,7 +75,7 @@ mod websocket {
         ConnClosed,
         Ping,
         Pong,
-        Ctrl
+        Ctrl,
     }
     #[derive(Debug)]
     struct Frame {
@@ -70,18 +84,19 @@ mod websocket {
         is_masked: bool,
         masking_key: u32,
         payload_len: u64,
-        payload: String
+        payload: String,
     }
 
     impl Frame {
         fn parse_op_code(byte: [u8; 1]) -> (bool, Option<Opcode>) {
-            let is_final =  byte[0] & 0b10000000 != 0; // First bit is whether this is the final segment of the message
-            let opcode = match byte[0] & 0b00001111 { // next 4 bits are the opcode
+            let is_final = byte[0] & 0b10000000 != 0; // First bit is whether this is the final segment of the message
+            let opcode = match byte[0] & 0b00001111 {
+                // next 4 bits are the opcode
                 0x1 => Some(Opcode::Text),
                 0x2 => Some(Opcode::Binary),
                 0x9 => Some(Opcode::Ping),
                 0xA => Some(Opcode::Pong),
-                _ => None
+                _ => None,
             };
 
             (is_final, opcode)
@@ -94,28 +109,24 @@ mod websocket {
             (is_masked, payload_len.into())
         }
 
-
-
         fn parse_extended_payload_len(stream: &mut TcpStream, is_64_bit: bool) -> u64 {
             if !is_64_bit {
                 // read the next 2 bytes
                 let mut payload_len_buff: [u8; 2] = [0; 2];
                 stream.read_exact(&mut payload_len_buff).unwrap();
-                ((payload_len_buff[0] as u64) << 8) +
-                ((payload_len_buff[1] as u64) << 0)
-            } 
-            else {
+                ((payload_len_buff[0] as u64) << 8) + ((payload_len_buff[1] as u64) << 0)
+            } else {
                 // read the next 8 bytes
                 let mut payload_len_buff: [u8; 8] = [0; 8];
                 stream.read_exact(&mut payload_len_buff).unwrap();
-                ((payload_len_buff[0] as u64) << 56) +
-                ((payload_len_buff[1] as u64) << 48) +
-                ((payload_len_buff[2] as u64) << 40) +
-                ((payload_len_buff[3] as u64) << 32) +
-                ((payload_len_buff[4] as u64) << 24) +
-                ((payload_len_buff[5] as u64) << 16) +
-                ((payload_len_buff[6] as u64) << 8) +
-                ((payload_len_buff[7] as u64) << 0)
+                ((payload_len_buff[0] as u64) << 56)
+                    + ((payload_len_buff[1] as u64) << 48)
+                    + ((payload_len_buff[2] as u64) << 40)
+                    + ((payload_len_buff[3] as u64) << 32)
+                    + ((payload_len_buff[4] as u64) << 24)
+                    + ((payload_len_buff[5] as u64) << 16)
+                    + ((payload_len_buff[6] as u64) << 8)
+                    + ((payload_len_buff[7] as u64) << 0)
             }
         }
 
@@ -123,9 +134,14 @@ mod websocket {
             stream.read_exact(buff).unwrap();
         }
 
-        fn read_payload(payload_buff: &mut Vec<u8>, is_masked: bool, mask_key: [u8; 4], stream: &mut TcpStream) -> String{
+        fn read_payload(
+            payload_buff: &mut Vec<u8>,
+            is_masked: bool,
+            mask_key: [u8; 4],
+            stream: &mut TcpStream,
+        ) -> String {
             stream.read_exact(payload_buff).unwrap();
-            
+
             if !is_masked {
                 0; // TODO return an error - all payloads from client must be masked
             }
@@ -189,10 +205,9 @@ mod websocket {
                 is_masked,
                 masking_key: 0,
                 payload_len,
-                payload
+                payload,
             };
 
-            // dbg!(&frame);
             Some(frame)
         }
 
@@ -203,12 +218,14 @@ mod websocket {
     pub struct WebSocketController {
         pub request: super::Request,
         pub stream: super::TcpStream,
-        pub conn_status: super::ConnectionStatus
+        pub conn_status: super::ConnectionStatus,
     }
 
     impl Controller for WebSocketController {
         fn handle(&mut self) {
-            self.stream.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
+            self.stream
+                .set_read_timeout(Some(Duration::from_millis(50)))
+                .unwrap();
             if self.verify_handshake() {
                 self.do_handshake()
             }
@@ -233,47 +250,56 @@ mod websocket {
                     return true;
                 }
             }
-    
+
             false
         }
-    
+
         fn do_handshake(&mut self) {
             let mut resp_headers: HashMap<String, String> = HashMap::new();
-    
-            let client_key = self.request.headers.get("Sec-WebSocket-Key").unwrap().clone();
+
+            let client_key = self
+                .request
+                .headers
+                .get("Sec-WebSocket-Key")
+                .unwrap()
+                .clone();
             let resp_key = self.make_hs_key(&client_key);
-    
-            resp_headers.insert("StatusLine".to_string(), "HTTP/1.1 101 Switching Protocols".to_string());
+
+            resp_headers.insert(
+                "StatusLine".to_string(),
+                "HTTP/1.1 101 Switching Protocols".to_string(),
+            );
             resp_headers.insert("Upgrade".to_string(), "websocket".to_string());
             resp_headers.insert("Connection".to_string(), "Upgrade".to_string());
             resp_headers.insert("Sec-WebSocket-Accept".to_string(), resp_key);
-            
+
             let resp = Response::new_no_body(resp_headers);
             let resp_str = resp.headers_to_string();
-    
+
             write_string_to_stream(resp_str, &mut self.stream);
         }
-    
+
         fn make_hs_key(&self, request_key: &String) -> String {
             let websocket_key: String = String::from("258EAFA5-E914-47DA-95CA-C5AB0DC85B11"); // Default websocket key
             let mut client_key: String = request_key.clone();
             client_key.push_str(&websocket_key); // Concat the websocket key onto the key sent from client
-    
+
             let mut hasher = Sha1::new(); // Create Sha1 hash of the concat key
             hasher.update(client_key.as_bytes());
             let hashed_key = hasher.finalize();
-    
+
             let base64_key: String = base64::encode(hashed_key); // Finalize key with base64
-    
+
             base64_key
         }
-    
+
         fn incoming_frame(&mut self) -> Option<Frame> {
             Frame::new(&mut self.stream)
         }
 
         fn handle_frame(&mut self, frame: Frame) -> bool {
-            if frame.payload == "pingme" { // Temp for testing ping 
+            if frame.payload == "pingme" {
+                // Temp for testing ping
                 self.send_ping();
             }
 
@@ -282,7 +308,7 @@ mod websocket {
                 return false;
             }
 
-            println!("done");
+            dbg!(frame);
             true
         }
 
@@ -295,7 +321,8 @@ mod websocket {
             false
         }
 
-        fn close_connection(&mut self) -> bool { // TODO support more status codes
+        fn close_connection(&mut self) -> bool {
+            // TODO support more status codes
             let op_byte = [0b10001000];
             let payload_len_byte = [0b00000010];
             let payload: [u8; 2] = [0b00000011, 0b11101000]; // 1000 status code - normal closer
@@ -311,17 +338,17 @@ mod websocket {
 }
 
 mod http {
-    use std::net::TcpStream;
     use super::Controller;
-    use crate::shared::Request;
+    use crate::request::Request;
+    use std::net::TcpStream;
 
     pub struct HttpController {
         pub request: Request,
-        pub stream:  TcpStream
+        pub stream: TcpStream,
     }
 
     impl Controller for HttpController {
-        fn handle(&mut self) {
-        }
+        fn handle(&mut self) {}
+        fn exit(&mut self) {}
     }
 }

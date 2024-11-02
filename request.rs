@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 use std::io::{prelude::*, BufReader};
 
+use crate::errors::InvalidHTTP;
 use std::io::Read;
 use std::net::TcpStream;
-
 
 #[derive(Debug)]
 pub enum RequestType {
     Http,
-    WebSocket
+    WebSocket,
+    Invalid,
 }
 
 #[derive(Debug)]
@@ -16,7 +17,7 @@ pub struct Request {
     pub _type: RequestType,
     pub headers: HashMap<String, String>,
     // pub uri: String,
-    pub body: String
+    pub body: String,
 }
 
 impl Request {
@@ -57,58 +58,28 @@ impl Request {
             return String::new();
         }
         let mut body_buffer = vec![0; content_length];
-        reader.read_exact(&mut body_buffer).expect("Couldn't read body");
+        reader
+            .read_exact(&mut body_buffer)
+            .expect("Couldn't read body");
 
         String::from_utf8(body_buffer).expect("Couldn't decode body")
     }
-    pub fn new_from_stream(stream: &mut TcpStream) -> Self {
+    pub fn new_from_stream(stream: &mut TcpStream) -> Result<Self, InvalidHTTP> {
         let (headers, request_type, content_length) = Self::parse_headers(stream);
         let body = Self::parse_body(stream, content_length);
-        
-        Request {
+
+        Ok(Request {
             _type: request_type,
             headers: headers,
             body: body,
-        }
+        })
     }
-}
 
-#[derive(Debug)]
-pub struct Response {
-    pub headers: HashMap<String, String>,
-    pub body: String
-}
-
-impl Response {
-    pub fn new() -> Self {
-        Response {
+    pub fn new_invalid() -> Self {
+        Request {
+            _type: RequestType::Invalid,
             headers: HashMap::new(),
-            body: String::new()
+            body: String::new(),
         }
-    }
-
-    pub fn new_no_body(headers: HashMap<String, String>) -> Self {
-        Response {
-            headers,
-            body: String::new()
-        }
-    }
-
-    pub fn headers_to_string(&self) -> String {
-        let mut h_str = String::new();
-        let status_line = self.headers.get("StatusLine").unwrap();
-        h_str.push_str(status_line);
-        h_str.push_str("\r\n");
-        for (key, value) in self.headers.iter() {
-            if key == "StatusLine" {
-                continue
-            }
-            h_str.push_str(&key);
-            h_str.push_str(": ");
-            h_str.push_str(&value);
-            h_str.push_str("\r\n");
-        }
-        h_str.push_str("\r\n");
-        h_str
     }
 }

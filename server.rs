@@ -1,7 +1,6 @@
+use crate::controller::handle_stream;
 use std::net::TcpListener;
 use std::process;
-use crate::controller::handle_stream;
-
 
 fn run_server(listener: TcpListener) {
     for stream in listener.incoming() {

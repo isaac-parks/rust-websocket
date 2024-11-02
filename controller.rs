@@ -5,7 +5,7 @@ use std::{
     io::Write,
     net::{Shutdown, TcpStream},
 };
-use websocket::{ConnectionStatus, WebSocketController};
+use websocket::WebSocketController;
 
 pub fn handle_stream(stream: TcpStream) {
     let mut c = make_controller(stream);
@@ -25,7 +25,6 @@ fn make_controller(mut stream: TcpStream) -> Box<dyn Controller> {
                 Box::new(WebSocketController {
                     request: req,
                     stream,
-                    conn_status: ConnectionStatus::Open,
                 })
             }
         }
@@ -59,12 +58,6 @@ mod websocket {
     use sha1::{Digest, Sha1};
     use std::time::Duration;
     use std::{collections::HashMap, io::Read, net::TcpStream};
-
-    #[derive(PartialEq)]
-    pub enum ConnectionStatus {
-        Open,
-        Closed,
-    }
 
     #[derive(Debug)]
     enum Opcode {
@@ -218,7 +211,6 @@ mod websocket {
     pub struct WebSocketController {
         pub request: super::Request,
         pub stream: super::TcpStream,
-        pub conn_status: super::ConnectionStatus,
     }
 
     impl Controller for WebSocketController {
@@ -233,9 +225,6 @@ mod websocket {
                 let frame: Option<Frame> = self.incoming_frame();
                 if let Some(f) = frame {
                     self.handle_frame(f);
-                    if self.conn_status == ConnectionStatus::Closed {
-                        break;
-                    }
                 }
             }
         }
@@ -300,7 +289,7 @@ mod websocket {
         fn handle_frame(&mut self, frame: Frame) -> bool {
             if frame.payload == "pingme" {
                 // Temp for testing ping
-                self.send_ping();
+                self.ping();
             }
 
             if frame.payload == "closeconnection" {
@@ -312,7 +301,7 @@ mod websocket {
             true
         }
 
-        fn send_ping(&mut self) -> bool {
+        fn ping(&mut self) -> bool {
             let op_byte = 0b10001001;
             let payload_byte = 0b00000000;
             let ping: [u8; 2] = [op_byte, payload_byte];
@@ -329,8 +318,6 @@ mod websocket {
             write_bytes_to_stream(&op_byte, &mut self.stream);
             write_bytes_to_stream(&payload_len_byte, &mut self.stream);
             write_bytes_to_stream(&payload, &mut self.stream);
-
-            self.conn_status = ConnectionStatus::Closed;
 
             false
         }

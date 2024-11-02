@@ -74,12 +74,4 @@ impl Request {
             body: body,
         })
     }
-
-    pub fn new_invalid() -> Self {
-        Request {
-            _type: RequestType::Invalid,
-            headers: HashMap::new(),
-            body: String::new(),
-        }
-    }
 }

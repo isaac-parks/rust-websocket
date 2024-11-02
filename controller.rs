@@ -1,65 +1,39 @@
+use crate::errors::InvalidHTTP;
 use crate::func::{write_bytes_to_stream, write_string_to_stream};
-use crate::request::{Request, RequestType};
-use http::HttpController;
+use crate::request::Request;
 use std::{
     io::Write,
     net::{Shutdown, TcpStream},
 };
-use websocket::WebSocketController;
+use websocket::{StatusCodes, WebSocketController};
 
-pub fn handle_stream(stream: TcpStream) {
+pub fn handle_stream(mut stream: TcpStream) {
     let mut c = make_controller(stream);
     c.handle();
 }
 
-fn make_controller(mut stream: TcpStream) -> Box<dyn Controller> {
+fn make_controller(mut stream: TcpStream) -> WebSocketController {
     let init_req = Request::new_from_stream(&mut stream);
     match init_req {
-        Ok(req) => {
-            if let RequestType::Http = req._type {
-                Box::new(HttpController {
-                    request: req,
-                    stream,
-                })
-            } else {
-                Box::new(WebSocketController {
-                    request: req,
-                    stream,
-                })
-            }
-        }
-        Err(_) => Box::new(EmptyController { stream }),
-    }
-}
-
-trait Controller {
-    fn handle(&mut self) {}
-    fn exit(&mut self) {}
-}
-
-pub struct EmptyController {
-    stream: TcpStream,
-}
-
-impl Controller for EmptyController {
-    fn handle(&mut self) {
-        self.exit()
-    }
-    fn exit(&mut self) {
-        write_string_to_stream(String::new(), &mut self.stream);
-        self.stream.shutdown(Shutdown::Both).unwrap();
+        Ok(req) => WebSocketController {
+            is_valid: true,
+            request: req,
+            stream,
+        },
+        Err(e) => WebSocketController::new_empty(stream),
     }
 }
 
 mod websocket {
-    use super::{write_bytes_to_stream, write_string_to_stream, Controller};
+    use super::{write_bytes_to_stream, write_string_to_stream};
+    use crate::request::Request;
     use crate::response::Response;
     use base64;
     use sha1::{Digest, Sha1};
     use std::time::Duration;
     use std::{collections::HashMap, io::Read, net::TcpStream};
 
-    enum StatusCodes {
+    pub enum StatusCodes {
         NORMAL_1000,
         GOING_AWAY_1001,
         PROTOCOL_ERROR_1002,
@@ -218,12 +192,21 @@ mod websocket {
         }
     }
     pub struct WebSocketController {
+        pub is_valid: bool,
         pub request: super::Request,
         pub stream: super::TcpStream,
     }
 
-    impl Controller for WebSocketController {
-        fn handle(&mut self) {
+    impl WebSocketController {
+        pub fn handle(&mut self) {
+            if !self.is_valid {
+                WebSocketController::exit_with_error(
+                    StatusCodes::PROTOCOL_ERROR_1002,
+                    &mut self.stream,
+                );
+
+                return;
+            }
             self.stream
                 .set_read_timeout(Some(Duration::from_millis(50)))
                 .unwrap();
@@ -237,9 +220,7 @@ mod websocket {
                 }
             }
         }
-    }
 
-    impl WebSocketController {
         fn verify_handshake(&self) -> bool {
             let request_line = self.request.headers.get("RequestLine");
             let upgrade_header = self.request.headers.get("Upgrade");
@@ -301,7 +282,7 @@ mod websocket {
             }
 
             if frame.payload == "closeconnection" {
-                self.close();
+                self.close(StatusCodes::INCONSISTENT_DATA_1007);
                 return false;
             }
 
@@ -318,31 +299,39 @@ mod websocket {
             false
         }
 
-        fn close(&mut self) -> bool {
-            let op_byte = [0b10001000];
+        fn match_status_op(status: StatusCodes) -> [u8; 2] {
+            match status {
+                StatusCodes::NORMAL_1000 => [0b00000011, 0b11101000],
+                StatusCodes::GOING_AWAY_1001 => [0x03, 0xE9],
+                StatusCodes::PROTOCOL_ERROR_1002 => [0x03, 0xEA],
+                StatusCodes::REFUSE_DATA_TYPE_1003 => [0x03, 0xEB],
+                StatusCodes::INCONSISTENT_DATA_1007 => [0x03, 0xEF],
+                StatusCodes::POLICY_ERROR_1008 => [0x03, 0xF0],
+                StatusCodes::TOO_BIG_1009 => [0x03, 0xF1],
+            }
+        }
+
+        fn close(&mut self, status: StatusCodes) -> bool {
+            let op_byte = [0b10001000]; // close operation
             let payload_len_byte = [0b00000010];
-            let payload: [u8; 2] = [0b00000011, 0b11101000]; // 1000 status code - normal closer
+            let payload: [u8; 2] = Self::match_status_op(status);
             write_bytes_to_stream(&op_byte, &mut self.stream);
             write_bytes_to_stream(&payload_len_byte, &mut self.stream);
             write_bytes_to_stream(&payload, &mut self.stream);
 
             false
         }
-    }
-}
 
-mod http {
-    use super::Controller;
-    use crate::request::Request;
-    use std::net::TcpStream;
+        pub fn exit_with_error(status: StatusCodes, stream: &mut TcpStream) -> bool {
+            true
+        }
 
-    pub struct HttpController {
-        pub request: Request,
-        pub stream: TcpStream,
-    }
-
-    impl Controller for HttpController {
-        fn handle(&mut self) {}
-        fn exit(&mut self) {}
+        pub fn new_empty(stream: TcpStream) -> Self {
+            WebSocketController {
+                is_valid: false,
+                request: Request::new_empty(),
+                stream,
+            }
+        }
     }
 }

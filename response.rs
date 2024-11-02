@@ -1,8 +1,4 @@
 use std::collections::HashMap;
-use std::io::{prelude::*, BufReader};
-
-use std::io::Read;
-use std::net::TcpStream;
 
 #[derive(Debug)]
 pub struct Response {

@@ -6,25 +6,18 @@ use std::io::Read;
 use std::net::TcpStream;
 
 #[derive(Debug)]
-pub enum RequestType {
-    Http,
-    WebSocket,
-    Invalid,
-}
-
-#[derive(Debug)]
 pub struct Request {
-    pub _type: RequestType,
+    pub is_valid: bool,
     pub headers: HashMap<String, String>,
     // pub uri: String,
     pub body: String,
 }
 
 impl Request {
-    fn parse_headers(s: &mut TcpStream) -> (HashMap<String, String>, RequestType, usize) {
+    fn parse_headers(s: &mut TcpStream) -> (HashMap<String, String>, bool, usize) {
+        let mut is_valid = false;
         let mut reader = BufReader::new(s);
         let mut itr = reader.by_ref().lines().map(|result| result.unwrap());
-        let mut request_type: RequestType = RequestType::Http;
         let mut headers: HashMap<String, String> = HashMap::new();
         if let Some(req_line) = itr.next() {
             headers.insert(String::from("RequestLine"), req_line);
@@ -45,13 +38,13 @@ impl Request {
                 }
 
                 if key.trim().to_ascii_lowercase().contains("websocket") {
-                    request_type = RequestType::WebSocket;
+                    is_valid = true;
                 }
                 headers.insert(key.trim().to_string(), value);
             }
         }
 
-        (headers, request_type, content_length)
+        (headers, is_valid, content_length)
     }
     fn parse_body(reader: &mut TcpStream, content_length: usize) -> String {
         if content_length <= 0 {
@@ -65,13 +58,20 @@ impl Request {
         String::from_utf8(body_buffer).expect("Couldn't decode body")
     }
     pub fn new_from_stream(stream: &mut TcpStream) -> Result<Self, InvalidHTTP> {
-        let (headers, request_type, content_length) = Self::parse_headers(stream);
+        let (headers, is_valid, content_length) = Self::parse_headers(stream);
         let body = Self::parse_body(stream, content_length);
 
         Ok(Request {
-            _type: request_type,
-            headers: headers,
-            body: body,
+            is_valid,
+            headers,
+            body,
         })
+    }
+    pub fn new_empty() -> Self {
+        Request {
+            headers: HashMap::new(),
+            is_valid: false,
+            body: String::new(),
+        }
     }
 }

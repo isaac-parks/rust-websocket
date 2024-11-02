@@ -297,12 +297,11 @@ mod websocket {
 
         fn handle_frame(&mut self, frame: Frame) -> bool {
             if frame.payload == "pingme" {
-                // Temp for testing ping
                 self.ping();
             }
 
             if frame.payload == "closeconnection" {
-                self.close_connection();
+                self.close();
                 return false;
             }
 
@@ -319,8 +318,7 @@ mod websocket {
             false
         }
 
-        fn close_connection(&mut self) -> bool {
-            // TODO support more status codes
+        fn close(&mut self) -> bool {
             let op_byte = [0b10001000];
             let payload_len_byte = [0b00000010];
             let payload: [u8; 2] = [0b00000011, 0b11101000]; // 1000 status code - normal closer

@@ -59,6 +59,15 @@ mod websocket {
     use std::time::Duration;
     use std::{collections::HashMap, io::Read, net::TcpStream};
 
+    enum StatusCodes {
+        NORMAL_1000,
+        GOING_AWAY_1001,
+        PROTOCOL_ERROR_1002,
+        REFUSE_DATA_TYPE_1003,
+        INCONSISTENT_DATA_1007,
+        POLICY_ERROR_1008,
+        TOO_BIG_1009,
+    }
     #[derive(Debug)]
     enum Opcode {
         Cont,

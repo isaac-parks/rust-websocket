@@ -14,14 +14,10 @@ pub fn init() {
 
 pub fn test_accept(w: &mut WebSocket) {
     loop {
-        println!("checking for connections in 5 seconds...\n\n");
-        let ten_millis = time::Duration::from_millis(5000);
-        let now = time::Instant::now();
+        let ten_millis = time::Duration::from_millis(1);
         thread::sleep(ten_millis);
         w.accept_connections();
-        println!("reading new messages in 5 seconds...\n\n");
-        let ten_millis = time::Duration::from_millis(5000);
-        let now = time::Instant::now();
+        let ten_millis = time::Duration::from_millis(1);
         thread::sleep(ten_millis);
         w.accept_messages();
     }

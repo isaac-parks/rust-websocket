@@ -171,7 +171,7 @@ pub struct WebSocketController {
     pub is_valid: bool,
     pub request: Request,
     pub stream: TcpStream,
-    pub frames: Vec<Frame>,
+    pub frame_buff: Vec<Frame>,
 }
 
 impl WebSocketController {
@@ -219,7 +219,7 @@ impl WebSocketController {
             let frame: Option<Frame> = self.read_incoming();
             if let Some(f) = frame {
                 // dbg!(&f);
-                self.frames.push(f);
+                self.frame_buff.push(f);
             } else {
                 return Err(WebSocketError);
             }
@@ -299,7 +299,7 @@ impl WebSocketController {
             is_valid: false,
             request: Request::new_empty(),
             stream,
-            frames: Vec::new(),
+            frame_buff: Vec::new(),
         }
     }
     pub fn new(mut stream: TcpStream, id: u64) -> WebSocketController {
@@ -311,7 +311,7 @@ impl WebSocketController {
                 is_valid: true,
                 request: req,
                 stream,
-                frames: Vec::new(),
+                frame_buff: Vec::new(),
             },
             Err(e) => WebSocketController::new_empty(stream),
         }

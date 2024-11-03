@@ -26,6 +26,7 @@ impl<'a> WebSocket<'a> {
             Ok(l) => {
                 self.listener = Some(l);
                 self.is_active = true;
+                println!("Started on:{}", hn);
                 return true;
             }
             Err(_) => {
@@ -51,7 +52,6 @@ impl<'a> WebSocket<'a> {
                         self.connections.push(c);
                     }
                     Err(_) => {
-                        println!("done accepting...");
                         break;
                     }
                 }
@@ -62,12 +62,10 @@ impl<'a> WebSocket<'a> {
     pub fn accept_messages(&mut self) {
         for c in &mut self.connections {
             c.receive_messages();
-            for f in &mut c.frames {
-                println!("messages recieved from client: {}", c.id);
+            for f in c.frame_buff.drain(..) {
+                println!("new message received from client {}", c.id);
                 dbg!(f);
             }
         }
-
-        println!("done reading new messages...");
     }
 }

@@ -4,9 +4,9 @@ mod errors;
 mod func;
 mod request;
 mod response;
-mod server;
+mod test_server;
 mod websocket;
 
 fn main() {
-    server::init();
+    test_server::init();
 }

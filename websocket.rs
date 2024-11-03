@@ -41,6 +41,7 @@ impl<'a> WebSocket<'a> {
             for s in l.incoming() {
                 match s {
                     Ok(stream) => {
+                        println!("client connected");
                         let mut c = WebSocketController::new(stream);
                         c.receive().unwrap();
                         self.controller = Some(c);

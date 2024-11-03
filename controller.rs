@@ -10,7 +10,7 @@ use std::{io::Write, net::Shutdown};
 
 // pub fn handle_stream(mut stream: TcpStream) {
 //     let mut c = make_controller(stream);
-//     c.receive();
+//     c.receive_messages();
 // }
 
 // fn make_controller(mut stream: TcpStream) -> WebSocketController {
@@ -184,45 +184,20 @@ impl Frame {
     }
 }
 pub struct WebSocketController {
+    pub id: u64,
     pub is_valid: bool,
     pub request: Request,
     pub stream: TcpStream,
+    pub frames: Vec<Frame>,
 }
 
 impl WebSocketController {
-    pub fn receive(&mut self) -> Result<Frame, WebSocketError> {
-        if !self.is_valid {
-            WebSocketController::exit_with_error(
-                StatusCodes::PROTOCOL_ERROR_1002,
-                &mut self.stream,
-            );
-
-            return Err(WebSocketError);
-        }
-        if self.verify_handshake() {
-            self.do_handshake()
-        }
-        loop {
-            let frame: Option<Frame> = self.incoming_frame();
-            if let Some(f) = frame {
-                self.handle_frame(f);
-            }
-        }
-    }
-
-    fn verify_handshake(&self) -> bool {
-        let request_line = self.request.headers.get("RequestLine");
-        let upgrade_header = self.request.headers.get("Upgrade");
-        if let Some(h) = upgrade_header {
-            if h == "websocket" && request_line.unwrap_or(&String::new()).contains("GET") {
-                return true;
-            }
+    pub fn handshake(&mut self) -> bool {
+        if !self.verify_handshake() {
+            self.is_valid = false;
+            return false;
         }
 
-        false
-    }
-
-    fn do_handshake(&mut self) {
         let mut resp_headers: HashMap<String, String> = HashMap::new();
 
         let client_key = self
@@ -245,6 +220,39 @@ impl WebSocketController {
         let resp_str = resp.headers_to_string();
 
         write_string_to_stream(resp_str, &mut self.stream);
+
+        true
+    }
+    pub fn receive_messages(&mut self) -> Result<Frame, WebSocketError> {
+        if !self.is_valid {
+            WebSocketController::exit_with_error(
+                StatusCodes::PROTOCOL_ERROR_1002,
+                &mut self.stream,
+            );
+
+            return Err(WebSocketError);
+        }
+        loop {
+            let frame: Option<Frame> = self.read_incoming();
+            if let Some(f) = frame {
+                // dbg!(&f);
+                self.frames.push(f);
+            } else {
+                return Err(WebSocketError);
+            }
+        }
+    }
+
+    fn verify_handshake(&self) -> bool {
+        let request_line = self.request.headers.get("RequestLine");
+        let upgrade_header = self.request.headers.get("Upgrade");
+        if let Some(h) = upgrade_header {
+            if h == "websocket" && request_line.unwrap_or(&String::new()).contains("GET") {
+                return true;
+            }
+        }
+
+        false
     }
 
     fn make_hs_key(&self, request_key: &String) -> String {
@@ -261,23 +269,23 @@ impl WebSocketController {
         base64_key
     }
 
-    fn incoming_frame(&mut self) -> Option<Frame> {
+    fn read_incoming(&mut self) -> Option<Frame> {
         Frame::new(&mut self.stream)
     }
 
-    fn handle_frame(&mut self, frame: Frame) -> bool {
-        if frame.payload == "pingme" {
-            self.ping();
-        }
+    // fn handle_frame(&mut self, frame: Frame) -> bool {
+    //     if frame.payload == "pingme" {
+    //         self.ping();
+    //     }
 
-        if frame.payload == "closeconnection" {
-            self.close(StatusCodes::INCONSISTENT_DATA_1007);
-            return false;
-        }
+    //     if frame.payload == "closeconnection" {
+    //         self.close(StatusCodes::INCONSISTENT_DATA_1007);
+    //         return false;
+    //     }
 
-        dbg!(frame);
-        true
-    }
+    //     dbg!(frame);
+    //     true
+    // }
 
     fn ping(&mut self) -> bool {
         let op_byte = 0b10001001;
@@ -318,19 +326,23 @@ impl WebSocketController {
     pub fn new_empty(stream: TcpStream) -> Self {
         // TODO remove pub
         WebSocketController {
+            id: 0, // 0 will always be an invalid id
             is_valid: false,
             request: Request::new_empty(),
             stream,
+            frames: Vec::new(),
         }
     }
-    pub fn new(mut stream: TcpStream) -> WebSocketController {
-        stream.set_read_timeout(Some(Duration::from_millis(5000)));
+    pub fn new(mut stream: TcpStream, id: u64) -> WebSocketController {
+        stream.set_read_timeout(Some(Duration::from_millis(5)));
         let init_req = Request::new_from_stream(&mut stream);
         match init_req {
             Ok(req) => WebSocketController {
+                id,
                 is_valid: true,
                 request: req,
                 stream,
+                frames: Vec::new(),
             },
             Err(e) => WebSocketController::new_empty(stream),
         }

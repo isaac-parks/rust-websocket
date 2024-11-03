@@ -5,7 +5,7 @@ pub struct WebSocket<'a> {
     pub port: &'a str,
     pub is_active: bool,
     listener: Option<TcpListener>,
-    controller: Option<WebSocketController>,
+    connections: Vec<WebSocketController>,
 }
 
 impl<'a> WebSocket<'a> {
@@ -14,7 +14,7 @@ impl<'a> WebSocket<'a> {
             host,
             port,
             listener: None,
-            controller: None,
+            connections: Vec::new(),
             is_active: false,
         }
     }
@@ -36,19 +36,38 @@ impl<'a> WebSocket<'a> {
         }
     }
 
-    pub fn accept(&mut self) {
+    pub fn accept_connections(&mut self) {
         if let Some(l) = &self.listener {
+            l.set_nonblocking(true).unwrap();
             for s in l.incoming() {
                 match s {
                     Ok(stream) => {
-                        println!("client connected");
-                        let mut c = WebSocketController::new(stream);
-                        c.receive().unwrap();
-                        self.controller = Some(c);
+                        let new_id: u64 = (self.connections.len() + 1).try_into().unwrap();
+                        let mut c = WebSocketController::new(stream, new_id);
+                        if !c.handshake() {
+                            println!("connection refused, invalid handshake");
+                        }
+                        println!("new client connection: {}", c.id);
+                        self.connections.push(c);
                     }
-                    Err(_) => self.controller = None,
+                    Err(_) => {
+                        println!("done accepting...");
+                        break;
+                    }
                 }
             }
         }
+    }
+
+    pub fn accept_messages(&mut self) {
+        for c in &mut self.connections {
+            c.receive_messages();
+            for f in &mut c.frames {
+                println!("messages recieved from client: {}", c.id);
+                dbg!(f);
+            }
+        }
+
+        println!("done reading new messages...");
     }
 }

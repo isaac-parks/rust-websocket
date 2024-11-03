@@ -8,23 +8,6 @@ use std::time::Duration;
 use std::{collections::HashMap, io::Read, net::TcpStream};
 use std::{io::Write, net::Shutdown};
 
-// pub fn handle_stream(mut stream: TcpStream) {
-//     let mut c = make_controller(stream);
-//     c.receive_messages();
-// }
-
-// fn make_controller(mut stream: TcpStream) -> WebSocketController {
-//     let init_req = Request::new_from_stream(&mut stream);
-//     match init_req {
-//         Ok(req) => WebSocketController {
-//             is_valid: true,
-//             request: req,
-//             stream,
-//         },
-//         Err(e) => WebSocketController::new_empty(stream),
-//     }
-// }
-
 pub enum StatusCodes {
     NORMAL_1000,
     GOING_AWAY_1001,
@@ -273,20 +256,6 @@ impl WebSocketController {
         Frame::new(&mut self.stream)
     }
 
-    // fn handle_frame(&mut self, frame: Frame) -> bool {
-    //     if frame.payload == "pingme" {
-    //         self.ping();
-    //     }
-
-    //     if frame.payload == "closeconnection" {
-    //         self.close(StatusCodes::INCONSISTENT_DATA_1007);
-    //         return false;
-    //     }
-
-    //     dbg!(frame);
-    //     true
-    // }
-
     fn ping(&mut self) -> bool {
         let op_byte = 0b10001001;
         let payload_byte = 0b00000000;
@@ -323,7 +292,7 @@ impl WebSocketController {
         true
     }
 
-    pub fn new_empty(stream: TcpStream) -> Self {
+    fn new_empty(stream: TcpStream) -> Self {
         // TODO remove pub
         WebSocketController {
             id: 0, // 0 will always be an invalid id

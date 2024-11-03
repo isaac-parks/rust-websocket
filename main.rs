@@ -5,6 +5,7 @@ mod func;
 mod request;
 mod response;
 mod server;
+mod websocket;
 
 fn main() {
     server::init();

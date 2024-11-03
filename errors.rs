@@ -2,12 +2,12 @@ use std::error::Error;
 use std::fmt::{Display, Formatter, Result};
 
 #[derive(Debug)]
-pub struct InvalidHTTP;
+pub struct WebSocketError;
 
-impl Display for InvalidHTTP {
+impl Display for WebSocketError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        write!(f, "Invalid HTTP")
+        write!(f, "Invalid Websocket")
     }
 }
 
-impl Error for InvalidHTTP {}
+impl Error for WebSocketError {}

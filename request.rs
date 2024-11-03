@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::{prelude::*, BufReader};
 
-use crate::errors::InvalidHTTP;
+use crate::errors::WebSocketError;
 use std::io::Read;
 use std::net::TcpStream;
 
@@ -57,7 +57,7 @@ impl Request {
 
         String::from_utf8(body_buffer).expect("Couldn't decode body")
     }
-    pub fn new_from_stream(stream: &mut TcpStream) -> Result<Self, InvalidHTTP> {
+    pub fn new_from_stream(stream: &mut TcpStream) -> Result<Self, WebSocketError> {
         let (headers, is_valid, content_length) = Self::parse_headers(stream);
         let body = Self::parse_body(stream, content_length);
 

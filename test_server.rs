@@ -10,9 +10,6 @@ pub fn init() {
     w.spawn();
 
     test_accept(&mut w);
-    //  How to implment a Single Threaded Server that can handle multiple connections?
-    //  Need a way to receieve all the new connections and store them
-    //  Need a way to see the data incoming to all connections, and then respond accordingly
 }
 
 pub fn test_accept(w: &mut WebSocket) {

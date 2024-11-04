@@ -1,6 +1,4 @@
 use crate::websocket::WebSocket;
-use std::net::TcpListener;
-use std::process;
 use std::{thread, time};
 
 pub fn init() {
@@ -13,11 +11,12 @@ pub fn init() {
 }
 
 pub fn test_accept(w: &mut WebSocket) {
+    w.set_single_thread_mode(true);
     loop {
-        let ten_millis = time::Duration::from_millis(1);
+        let ten_millis = time::Duration::from_millis(50);
         thread::sleep(ten_millis);
         w.accept_connections();
-        let ten_millis = time::Duration::from_millis(1);
+        let ten_millis = time::Duration::from_millis(50);
         thread::sleep(ten_millis);
         w.accept_messages();
     }

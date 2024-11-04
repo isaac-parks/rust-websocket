@@ -35,7 +35,7 @@ pub struct Frame {
     is_masked: bool,
     masking_key: u32,
     payload_len: u64,
-    payload: String,
+    pub payload: String,
 }
 
 impl Frame {
@@ -110,7 +110,7 @@ impl Frame {
         payload
     }
 
-    fn parse_frame_buffer(stream: &mut TcpStream) -> Option<Frame> {
+    fn parse_tcp_buffer(stream: &mut TcpStream) -> Option<Frame> {
         // First byte is whether this is the final segment of the message plus the opcode
         let mut opcode_buff: [u8; 1] = [0; 1];
         let read_op = stream.read_exact(&mut opcode_buff);
@@ -118,8 +118,8 @@ impl Frame {
             return None;
         }
         let (is_final, opcode) = Frame::parse_op_code(opcode_buff);
-        if let Option::None = opcode {
-            return Option::None;
+        if let None = opcode {
+            return None;
         }
 
         // Second byte is whether the payload is masked, and the payload length
@@ -129,6 +129,11 @@ impl Frame {
             return None;
         }
         let (is_masked, mut payload_len) = Frame::parse_payload_len(payload_len_buff);
+
+        if !is_masked {
+            // payload from the client should always be masked
+            return None;
+        }
 
         // If payload_len is equal to 126 or 127 the payload length is read from the next bytes instead
         if payload_len == 126 {
@@ -163,7 +168,7 @@ impl Frame {
     }
 
     fn new(stream: &mut TcpStream) -> Option<Self> {
-        Frame::parse_frame_buffer(stream)
+        Frame::parse_tcp_buffer(stream)
     }
 }
 pub struct WebSocketController {
@@ -206,7 +211,7 @@ impl WebSocketController {
 
         true
     }
-    pub fn receive_messages(&mut self) -> Result<Frame, WebSocketError> {
+    pub fn receive(&mut self) -> Result<Frame, WebSocketError> {
         if !self.is_valid {
             WebSocketController::exit_with_error(
                 StatusCodes::PROTOCOL_ERROR_1002,
@@ -224,6 +229,19 @@ impl WebSocketController {
                 return Err(WebSocketError);
             }
         }
+    }
+
+    pub fn send(&mut self, m: String) -> Result<bool, WebSocketError> {
+        if !self.is_valid {
+            WebSocketController::exit_with_error(
+                StatusCodes::PROTOCOL_ERROR_1002,
+                &mut self.stream,
+            );
+
+            return Err(WebSocketError);
+        }
+        write_string_to_stream(m, &mut self.stream);
+        Ok(true)
     }
 
     fn verify_handshake(&self) -> bool {

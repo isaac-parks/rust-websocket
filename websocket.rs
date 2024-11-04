@@ -4,6 +4,7 @@ pub struct WebSocket<'a> {
     pub host: &'a str,
     pub port: &'a str,
     pub is_active: bool,
+    pub run_single_threaded: bool,
     listener: Option<TcpListener>,
     connections: Vec<WebSocketController>,
 }
@@ -15,6 +16,7 @@ impl<'a> WebSocket<'a> {
             port,
             listener: None,
             connections: Vec::new(),
+            run_single_threaded: false,
             is_active: false,
         }
     }
@@ -37,9 +39,15 @@ impl<'a> WebSocket<'a> {
         }
     }
 
+    pub fn set_single_thread_mode(&mut self, b: bool) {
+        self.run_single_threaded = b;
+        if let Some(l) = &self.listener {
+            l.set_nonblocking(b).unwrap(); // TODO error handling
+        }
+    }
+
     pub fn accept_connections(&mut self) {
         if let Some(l) = &self.listener {
-            l.set_nonblocking(true).unwrap();
             for s in l.incoming() {
                 match s {
                     Ok(stream) => {
@@ -61,11 +69,17 @@ impl<'a> WebSocket<'a> {
 
     pub fn accept_messages(&mut self) {
         for c in &mut self.connections {
-            c.receive_messages();
+            c.receive().unwrap(); // Handle errors
             for f in c.frame_buff.drain(..) {
                 println!("new message received from client {}", c.id);
                 dbg!(f);
             }
+        }
+    }
+
+    pub fn alert_all(&mut self, message: String) {
+        for c in &mut self.connections {
+            c.send(message.clone());
         }
     }
 }

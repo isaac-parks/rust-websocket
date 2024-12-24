@@ -81,8 +81,11 @@ impl Frame {
         }
     }
 
-    fn read_mask_key_into_buff(buff: &mut [u8; 4], stream: &mut TcpStream) {
-        stream.read_exact(buff).unwrap();
+    fn read_mask_key_into_buff(buff: &mut [u8; 4], stream: &mut TcpStream) -> bool {
+        match stream.read_exact(buff) {
+            Ok(_) => true,
+            Err(_) => false,
+        }
     }
 
     fn read_payload(
@@ -91,7 +94,7 @@ impl Frame {
         mask_key: [u8; 4],
         stream: &mut TcpStream,
     ) -> String {
-        stream.read_exact(payload_buff).unwrap();
+        stream.read_exact(payload_buff);
 
         if !is_masked {
             0; // TODO return an error - all payloads from client must be masked
@@ -149,7 +152,9 @@ impl Frame {
         // 3rd 4th 5th and 6th byte is masking key
         let mut mask_key_buff: [u8; 4] = [0; 4];
         if is_masked {
-            Frame::read_mask_key_into_buff(&mut mask_key_buff, stream);
+            if let false = Frame::read_mask_key_into_buff(&mut mask_key_buff, stream) {
+                return None;
+            }
         }
 
         // Rest will be payload
@@ -168,22 +173,43 @@ impl Frame {
     }
 
     fn new(stream: &mut TcpStream) -> Option<Self> {
-        Frame::parse_tcp_buffer(stream)
+        match Frame::parse_tcp_buffer(stream) {
+            Some(frame) => Some(frame),
+            None => None,
+        }
     }
 }
 pub struct WebSocketController {
     pub id: u64,
-    pub is_valid: bool,
     pub request: Request,
     pub stream: TcpStream,
     pub frame_buff: Vec<Frame>,
+    is_valid: bool,
 }
 
 impl WebSocketController {
-    pub fn handshake(&mut self) -> bool {
-        if !self.verify_handshake() {
+    pub fn init(mut stream: TcpStream, id: u64) -> Result<WebSocketController, WebSocketError> {
+        stream.set_read_timeout(Some(Duration::from_millis(5)));
+        let init_req = Request::new_from_stream(&mut stream);
+        let mut init_controller: Result<WebSocketController, WebSocketError> = match init_req {
+            Ok(req) => Ok(WebSocketController {
+                id,
+                is_valid: true,
+                request: req,
+                stream,
+                frame_buff: Vec::new(),
+            }),
+            Err(e) => Err(WebSocketError),
+        };
+
+        let mut new_controller = init_controller?;
+        new_controller.handshake()?;
+        Ok(new_controller)
+    }
+    fn handshake(&mut self) -> Result<&mut WebSocketController, WebSocketError> {
+        if !self.check_request_header() {
             self.is_valid = false;
-            return false;
+            return Err(WebSocketError);
         }
 
         let mut resp_headers: HashMap<String, String> = HashMap::new();
@@ -209,9 +235,10 @@ impl WebSocketController {
 
         write_string_to_stream(resp_str, &mut self.stream);
 
-        true
+        Ok(self)
     }
-    pub fn receive(&mut self) -> Result<Frame, WebSocketError> {
+
+    pub fn receive_into_buff(&mut self) -> Result<(), WebSocketError> {
         if !self.is_valid {
             WebSocketController::exit_with_error(
                 StatusCodes::PROTOCOL_ERROR_1002,
@@ -226,7 +253,7 @@ impl WebSocketController {
                 // dbg!(&f);
                 self.frame_buff.push(f);
             } else {
-                return Err(WebSocketError);
+                return Ok(());
             }
         }
     }
@@ -244,7 +271,11 @@ impl WebSocketController {
         Ok(true)
     }
 
-    fn verify_handshake(&self) -> bool {
+    pub fn verify(&mut self) -> bool {
+        return self.is_valid;
+    }
+
+    fn check_request_header(&self) -> bool {
         let request_line = self.request.headers.get("RequestLine");
         let upgrade_header = self.request.headers.get("Upgrade");
         if let Some(h) = upgrade_header {
@@ -271,7 +302,11 @@ impl WebSocketController {
     }
 
     fn read_incoming(&mut self) -> Option<Frame> {
-        Frame::new(&mut self.stream)
+        if let Some(f) = Frame::new(&mut self.stream) {
+            return Some(f);
+        }
+
+        None
     }
 
     fn ping(&mut self) -> bool {
@@ -285,7 +320,7 @@ impl WebSocketController {
 
     fn match_status_op(status: StatusCodes) -> [u8; 2] {
         match status {
-            StatusCodes::NORMAL_1000 => [0b00000011, 0b11101000],
+            StatusCodes::NORMAL_1000 => [0x03, 0xE8],
             StatusCodes::GOING_AWAY_1001 => [0x03, 0xE9],
             StatusCodes::PROTOCOL_ERROR_1002 => [0x03, 0xEA],
             StatusCodes::REFUSE_DATA_TYPE_1003 => [0x03, 0xEB],
@@ -308,30 +343,5 @@ impl WebSocketController {
 
     pub fn exit_with_error(status: StatusCodes, stream: &mut TcpStream) -> bool {
         true
-    }
-
-    fn new_empty(stream: TcpStream) -> Self {
-        // TODO remove pub
-        WebSocketController {
-            id: 0, // 0 will always be an invalid id
-            is_valid: false,
-            request: Request::new_empty(),
-            stream,
-            frame_buff: Vec::new(),
-        }
-    }
-    pub fn new(mut stream: TcpStream, id: u64) -> WebSocketController {
-        stream.set_read_timeout(Some(Duration::from_millis(5)));
-        let init_req = Request::new_from_stream(&mut stream);
-        match init_req {
-            Ok(req) => WebSocketController {
-                id,
-                is_valid: true,
-                request: req,
-                stream,
-                frame_buff: Vec::new(),
-            },
-            Err(e) => WebSocketController::new_empty(stream),
-        }
     }
 }

@@ -1,4 +1,4 @@
-use crate::controller::WebSocketController;
+use crate::controller::{Frame, WebSocketController};
 use std::net::TcpListener;
 pub struct WebSocket<'a> {
     pub host: &'a str,
@@ -28,7 +28,7 @@ impl<'a> WebSocket<'a> {
             Ok(l) => {
                 self.listener = Some(l);
                 self.is_active = true;
-                println!("Started on:{}", hn);
+                println!("Started on {}", hn);
                 return true;
             }
             Err(_) => {
@@ -52,12 +52,14 @@ impl<'a> WebSocket<'a> {
                 match s {
                     Ok(stream) => {
                         let new_id: u64 = (self.connections.len() + 1).try_into().unwrap();
-                        let mut c = WebSocketController::new(stream, new_id);
-                        if !c.handshake() {
-                            println!("connection refused, invalid handshake");
+                        let c = WebSocketController::init(stream, new_id);
+                        match c {
+                            Ok(controller) => {
+                                println!("new client connection: {}", controller.id);
+                                self.connections.push(controller);
+                            }
+                            Err(_) => (),
                         }
-                        println!("new client connection: {}", c.id);
-                        self.connections.push(c);
                     }
                     Err(_) => {
                         break;
@@ -69,12 +71,17 @@ impl<'a> WebSocket<'a> {
 
     pub fn accept_messages(&mut self) {
         for c in &mut self.connections {
-            c.receive().unwrap(); // Handle errors
-            for f in c.frame_buff.drain(..) {
-                println!("new message received from client {}", c.id);
-                dbg!(f);
+            if let Ok(_) = c.receive_into_buff() {
+                for f in c.frame_buff.drain(..) {
+                    println!("new message received from client {}", c.id);
+                    dbg!(f);
+                }
             }
         }
+    }
+
+    fn close_connections(&mut self) {
+        self.connections.retain_mut(|c| c.verify());
     }
 
     pub fn alert_all(&mut self, message: String) {

@@ -67,11 +67,4 @@ impl Request {
             body,
         })
     }
-    pub fn new_empty() -> Self {
-        Request {
-            headers: HashMap::new(),
-            is_valid: false,
-            body: String::new(),
-        }
-    }
 }

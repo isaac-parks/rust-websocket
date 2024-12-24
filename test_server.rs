@@ -3,11 +3,13 @@ use std::{thread, time};
 
 pub fn init() {
     let port: &str = "1818";
-    let host: &str = "192.168.0.108";
+    let host: &str = "192.168.0.105";
     let mut w: WebSocket = WebSocket::new_server(host, port);
-    w.spawn();
+    if let true = w.spawn() {
+        test_accept(&mut w);
+    }
 
-    test_accept(&mut w);
+    println!("error creating server")
 }
 
 pub fn test_accept(w: &mut WebSocket) {

@@ -1,4 +1,4 @@
-use crate::controller::{Frame, WebSocketController};
+use crate::controller::{Frame, WebSocketConnection};
 use std::net::TcpListener;
 pub struct WebSocket<'a> {
     pub host: &'a str,
@@ -6,7 +6,7 @@ pub struct WebSocket<'a> {
     pub is_active: bool,
     pub run_single_threaded: bool,
     listener: Option<TcpListener>,
-    connections: Vec<WebSocketController>,
+    connections: Vec<WebSocketConnection>,
 }
 
 impl<'a> WebSocket<'a> {
@@ -52,7 +52,7 @@ impl<'a> WebSocket<'a> {
                 match s {
                     Ok(stream) => {
                         let new_id: u64 = (self.connections.len() + 1).try_into().unwrap();
-                        let c = WebSocketController::init(stream, new_id);
+                        let c = WebSocketConnection::init(stream, new_id);
                         match c {
                             Ok(controller) => {
                                 println!("new client connection: {}", controller.id);

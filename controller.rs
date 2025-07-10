@@ -179,7 +179,7 @@ impl Frame {
         }
     }
 }
-pub struct WebSocketController {
+pub struct WebSocketConnection {
     pub id: u64,
     pub request: Request,
     pub stream: TcpStream,
@@ -187,12 +187,12 @@ pub struct WebSocketController {
     is_valid: bool,
 }
 
-impl WebSocketController {
-    pub fn init(mut stream: TcpStream, id: u64) -> Result<WebSocketController, WebSocketError> {
+impl WebSocketConnection {
+    pub fn init(mut stream: TcpStream, id: u64) -> Result<WebSocketConnection, WebSocketError> {
         stream.set_read_timeout(Some(Duration::from_millis(5)));
         let init_req = Request::new_from_stream(&mut stream);
-        let mut init_controller: Result<WebSocketController, WebSocketError> = match init_req {
-            Ok(req) => Ok(WebSocketController {
+        let mut init_connection: Result<WebSocketConnection, WebSocketError> = match init_req {
+            Ok(req) => Ok(WebSocketConnection {
                 id,
                 is_valid: true,
                 request: req,
@@ -202,11 +202,11 @@ impl WebSocketController {
             Err(e) => Err(WebSocketError),
         };
 
-        let mut new_controller = init_controller?;
-        new_controller.handshake()?;
-        Ok(new_controller)
+        let mut init_connection = init_connection?;
+        init_connection.handshake()?;
+        Ok(init_connection)
     }
-    fn handshake(&mut self) -> Result<&mut WebSocketController, WebSocketError> {
+    fn handshake(&mut self) -> Result<&mut WebSocketConnection, WebSocketError> {
         if !self.check_request_header() {
             self.is_valid = false;
             return Err(WebSocketError);
@@ -240,7 +240,7 @@ impl WebSocketController {
 
     pub fn receive_into_buff(&mut self) -> Result<(), WebSocketError> {
         if !self.is_valid {
-            WebSocketController::exit_with_error(
+            WebSocketConnection::exit_with_error(
                 StatusCodes::PROTOCOL_ERROR_1002,
                 &mut self.stream,
             );
@@ -260,7 +260,7 @@ impl WebSocketController {
 
     pub fn send(&mut self, m: String) -> Result<bool, WebSocketError> {
         if !self.is_valid {
-            WebSocketController::exit_with_error(
+            WebSocketConnection::exit_with_error(
                 StatusCodes::PROTOCOL_ERROR_1002,
                 &mut self.stream,
             );
